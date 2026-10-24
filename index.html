@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Pliegos A4 con QR Dinámicos</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- QRCode.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- html2canvas for high-DPI sheet export -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #0f172a;
+        }
+
+        /* Proportional A4 Paper Simulation (210mm x 297mm aspect ratio) */
+        .a4-sheet {
+            width: 100%;
+            max-width: 595px;
+            aspect-ratio: 210 / 297;
+            background: #ffffff;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+            padding: 2.5%;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: 2.5%;
+            box-sizing: border-box;
+            position: relative;
+            border-radius: 4px;
+        }
+
+        /* Card Slot in A4 Sheet */
+        .card-slot {
+            position: relative;
+            background-color: #f1f5f9;
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .card-slot:hover {
+            border-color: #3b82f6;
+            box-shadow: 0 4px 12px rgba(59, 130, 246, 0.15);
+        }
+
+        .card-slot.selected {
+            border: 3px solid #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+        }
+
+        /* QR Overlay */
+        .qr-wrapper {
+            position: absolute;
+            background: #ffffff;
+            padding: 3px;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+            transform: translate(-50%, -50%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .qr-wrapper canvas, .qr-wrapper img {
+            display: block;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 4px;
+        }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; padding: 0 !important; }
+            .a4-sheet {
+                box-shadow: none !important;
+                width: 100% !important;
+                max-width: none !important;
+                border-radius: 0 !important;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white py-3.5 px-6 shadow-md no-print">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-3">
+            <div class="flex items-center gap-2.5">
+                <div class="bg-white/10 p-2 rounded-xl backdrop-blur-md">
+                    <svg class="w-6 h-6 text-yellow-300" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-lg font-black tracking-tight leading-none">Generador de Pliegos A4 con QR Dinámicos</h1>
+                    <p class="text-xs text-blue-100 mt-1 font-medium">6 Tarjetas (10x10 cm) - Sincronización Global de QR</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button onclick="exportarPliegoA4()" class="bg-emerald-500 hover:bg-emerald-600 active:scale-95 text-white text-xs font-bold py-2.5 px-4 rounded-xl shadow transition flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                    </svg>
+                    Descargar Pliego A4 (300 DPI)
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="max-w-7xl mx-auto w-full flex-1 p-4 md:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- LEFT PANEL: CONTROLS & EDITOR -->
+        <section class="lg:col-span-6 space-y-5 no-print">
+
+            <!-- Card Selector Tabs -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex justify-between items-center mb-2.5">
+                    <label class="text-xs font-black text-slate-500 uppercase tracking-wider">
+                        1. Seleccioná la tarjeta a editar:
+                    </label>
+                    <span id="labelActiva" class="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
+                        Editando Tarjeta #1
+                    </span>
+                </div>
+                <div class="grid grid-cols-6 gap-2" id="gridPestanas">
+                    <!-- Dynamic tabs 1..6 generated by JS -->
+                </div>
+            </div>
+
+            <!-- Background Image Upload -->
+            <div class="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 space-y-3">
+                <label class="text-xs font-black text-slate-500 uppercase tracking-wider block">
+                    2. Imagen de Fondo de la Tarjeta (10x10 cm):
+                </label>
+                <div class="flex flex-wrap gap-2 items-center">
+                    <label class="flex-1 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-xs font-bold py-2.5 px-3 rounded-xl cursor-pointer text-center transition">
+                        🖼️ Subir Fondo para Tarjeta Actual
+                        <input type="file" id="inputFondoIndividual" accept="image/*" class="hidden" onchange="cargarFondo(event, false)">
+                    </label>
+                    <label class="flex-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-xl cursor-pointer text-center transition">
+                        🌐 Aplicar Fondo a TODAS (6)
+                        <input type="file" id="inputFondoGlobal" accept="image/*" class="hidden" onchange="cargarFondo(event, true)">
+                    </label>
+                </div>
+                <button onclick="cargarDisenoDemo()" class="w-full text-xs text-slate-500 hover:text-blue-600 font-medium underline text-center">
+                    Cargar diseño demo por defecto
+                </button>
+            </div>
+
+            <!-- Position & Size Controls (UNIFIED GLOBAL QR SETTINGS) -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div class="flex justify-between items-center">
+                    <h3 class="text-xs font-black text-slate-500 uppercase tracking-wider">
+                        3. Ajustar Código QR (Afecta a las 6 Tarjetas):
+                    </h3>
+                    <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md">
+                        Sincronizado
+                    </span>
+                </div>
+
+                <!-- Size -->
+                <div>
+                    <div class="flex justify-between text-xs font-bold text-slate-700 mb-1">
+                        <span>Tamaño del QR:</span>
+                        <span id="valTamanoQR" class="font-mono text-blue-600">65 px</span>
+                    </div>
+                    <input type="range" id="sliderTamanoQR" min="30" max="110" value="65" oninput="actualizarAjustesQR()" class="w-full accent-blue-600 cursor-pointer">
+                </div>
+
+                <!-- Position X & Y -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <div class="flex justify-between text-xs font-bold text-slate-700 mb-1">
+                            <span>Posición Horizontal (X):</span>
+                            <span id="valPosX" class="font-mono text-blue-600">70%</span>
+                        </div>
+                        <input type="range" id="sliderPosX" min="10" max="90" value="70" oninput="actualizarAjustesQR()" class="w-full accent-blue-600 cursor-pointer">
+                    </div>
+                    <div>
+                        <div class="flex justify-between text-xs font-bold text-slate-700 mb-1">
+                            <span>Posición Vertical (Y):</span>
+                            <span id="valPosY" class="font-mono text-blue-600">70%</span>
+                        </div>
+                        <input type="range" id="sliderPosY" min="10" max="90" value="70" oninput="actualizarAjustesQR()" class="w-full accent-blue-600 cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dynamic QR Fields -->
+            <div class="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 space-y-3.5">
+                <h3 class="text-xs font-black text-slate-500 uppercase tracking-wider">
+                    4. Datos del Cliente y Redirección Dinámica:
+                </h3>
+
+                <div>
+                    <label class="text-xs font-bold text-slate-700 block mb-1">Nombre del Cliente / Comercio:</label>
+                    <input type="text" id="inputNombre" oninput="actualizarCampo('nombre', this.value)" class="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium">
+                </div>
+
+                <!-- Static Redirect explanation -->
+                <div class="bg-blue-50/80 border border-blue-200 p-3 rounded-xl text-xs text-blue-900 space-y-1">
+                    <p class="font-bold flex items-center gap-1">
+                        💡 ¿Por qué es un QR Dinámico?
+                    </p>
+                    <p class="text-[11px] leading-relaxed text-blue-800">
+                        El dibujo impreso codifica la <strong>URL Estática</strong>. Si el cliente cambia de link, actualizas la <strong>URL Final</strong> sin necesidad de reimprimir el sticker.
+                    </p>
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold text-slate-700 block mb-1">URL Estática grabada en el dibujo del QR:</label>
+                    <input type="text" id="inputUrlQR" oninput="actualizarCampo('urlQR', this.value)" class="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono text-blue-700 font-bold bg-slate-50">
+                </div>
+
+                <div>
+                    <label class="text-xs font-bold text-slate-700 block mb-1">URL Final de Google Reseñas (Destino real):</label>
+                    <input type="text" id="inputUrlGoogle" oninput="actualizarCampo('urlGoogle', this.value)" class="w-full text-xs p-2.5 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-mono text-slate-600">
+                </div>
+            </div>
+
+        </section>
+
+        <!-- RIGHT PANEL: LIVE FULL A4 SHEET -->
+        <section class="lg:col-span-6 flex flex-col items-center">
+            <div class="w-full flex justify-between items-center mb-3 no-print">
+                <span class="text-xs font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+                    👁️ Vista Previa del Pliego A4 Completo
+                </span>
+                <span class="text-[11px] font-bold text-slate-500 bg-slate-200/80 px-2.5 py-1 rounded-md">
+                    210 x 297 mm
+                </span>
+            </div>
+
+            <!-- Interactive A4 Container -->
+            <div id="hojaA4" class="a4-sheet shadow-2xl">
+                <!-- 6 slots created dynamically -->
+            </div>
+
+            <p class="text-[11px] text-slate-400 font-medium text-center mt-3 no-print">
+                Haz clic en cualquiera de las 6 tarjetas para seleccionarla y editar sus datos individuales.
+            </p>
+        </section>
+
+    </main>
+
+    <!-- JavaScript Application Logic -->
+    <script>
+        // State for 6 cards
+        let tarjetas = Array.from({ length: 6 }, (_, i) => ({
+            id: i,
+            nombre: `Cliente #${i + 1}`,
+            urlQR: `https://g.page/r/cliente_${i + 1}/review`,
+            urlGoogle: `https://g.page/r/cliente_${i + 1}/review`,
+            fondo: null
+        }));
+
+        // Global QR settings applied uniformly to ALL cards
+        let globalQrSettings = {
+            qrSize: 65, // px
+            qrX: 70,    // %
+            qrY: 70     // %
+        };
+
+        let indiceActivo = 0;
+
+        // Default SVG Card Background (Clean text without special accents to avoid encoding bugs)
+        const DEMO_SVG_BG = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" viewBox="0 0 400 400"><rect width="400" height="130" fill="%231d62b4"/><text x="200" y="45" font-family="sans-serif" font-size="22" font-weight="black" fill="white" text-anchor="middle">Tu Opinion Importa</text><circle cx="200" cy="110" r="30" fill="white"/><text x="200" y="123" font-family="sans-serif" font-size="36" font-weight="900" fill="%234285F4" text-anchor="middle">G</text><rect y="130" width="400" height="270" fill="%23ffffff"/><text x="200" y="190" font-family="sans-serif" font-size="26" fill="%23f59e0b" text-anchor="middle">★ ★ ★ ★ ★</text><text x="200" y="230" font-family="sans-serif" font-size="20" font-weight="bold" fill="%231e293b" text-anchor="middle">Como Dejar una Resena</text><text x="120" y="270" font-family="sans-serif" font-size="12" fill="%2364748b" text-anchor="middle">1. Activa NFC</text><text x="120" y="290" font-family="sans-serif" font-size="12" fill="%2364748b" text-anchor="middle">2. Acerca tu celular</text><circle cx="120" cy="335" r="26" fill="none" stroke="%23334155" stroke-width="3"/><text x="120" y="340" font-family="sans-serif" font-size="12" font-weight="bold" fill="%23334155" text-anchor="middle">NFC</text><text x="280" y="375" font-family="sans-serif" font-size="10" fill="%2394a3b8" text-anchor="middle">Enfoca el QR</text></svg>';
+
+        window.onload = function() {
+            renderizarPestanas();
+            cargarDisenoDemo();
+        };
+
+        // Render Selector Tabs
+        function renderizarPestanas() {
+            const grid = document.getElementById('gridPestanas');
+            grid.innerHTML = '';
+
+            tarjetas.forEach((t, index) => {
+                const btn = document.createElement('button');
+                const esActiva = index === indiceActivo;
+                btn.className = `py-2 rounded-xl text-xs font-black transition border ${
+                    esActiva 
+                    ? 'bg-blue-600 text-white border-blue-600 shadow-md' 
+                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border-slate-200'
+                }`;
+                btn.onclick = () => seleccionarTarjeta(index);
+                btn.innerText = `#${index + 1}`;
+                grid.appendChild(btn);
+            });
+        }
+
+        // Select Active Card
+        function seleccionarTarjeta(index) {
+            indiceActivo = index;
+            renderizarPestanas();
+            sincronizarFormulario();
+            renderizarHojaA4();
+        }
+
+        // Fill Form Fields with active card data
+        function sincronizarFormulario() {
+            const t = tarjetas[indiceActivo];
+            document.getElementById('labelActiva').innerText = `Editando Tarjeta #${indiceActivo + 1}`;
+            document.getElementById('inputNombre').value = t.nombre;
+            document.getElementById('inputUrlQR').value = t.urlQR;
+            document.getElementById('inputUrlGoogle').value = t.urlGoogle;
+
+            document.getElementById('sliderTamanoQR').value = globalQrSettings.qrSize;
+            document.getElementById('sliderPosX').value = globalQrSettings.qrX;
+            document.getElementById('sliderPosY').value = globalQrSettings.qrY;
+
+            document.getElementById('valTamanoQR').innerText = `${globalQrSettings.qrSize} px`;
+            document.getElementById('valPosX').innerText = `${globalQrSettings.qrX}%`;
+            document.getElementById('valPosY').innerText = `${globalQrSettings.qrY}%`;
+        }
+
+        // Update Individual Field Value
+        function actualizarCampo(campo, valor) {
+            tarjetas[indiceActivo][campo] = valor;
+            renderizarHojaA4();
+        }
+
+        // Update Unified Global QR Settings (Affects all 6 cards)
+        function actualizarAjustesQR() {
+            globalQrSettings.qrSize = parseInt(document.getElementById('sliderTamanoQR').value);
+            globalQrSettings.qrX = parseInt(document.getElementById('sliderPosX').value);
+            globalQrSettings.qrY = parseInt(document.getElementById('sliderPosY').value);
+
+            document.getElementById('valTamanoQR').innerText = `${globalQrSettings.qrSize} px`;
+            document.getElementById('valPosX').innerText = `${globalQrSettings.qrX}%`;
+            document.getElementById('valPosY').innerText = `${globalQrSettings.qrY}%`;
+
+            renderizarHojaA4();
+        }
+
+        // Render Entire 6-Card A4 Sheet
+        function renderizarHojaA4() {
+            const contenedor = document.getElementById('hojaA4');
+            contenedor.innerHTML = '';
+
+            tarjetas.forEach((t, i) => {
+                const slot = document.createElement('div');
+                const esActiva = i === indiceActivo;
+                slot.className = `card-slot ${esActiva ? 'selected' : ''}`;
+                slot.onclick = () => seleccionarTarjeta(i);
+
+                // Background Image
+                if (t.fondo) {
+                    const imgBg = document.createElement('img');
+                    imgBg.src = t.fondo;
+                    imgBg.className = "w-full h-full object-cover absolute inset-0";
+                    slot.appendChild(imgBg);
+                } else {
+                    const placeholder = document.createElement('div');
+                    placeholder.className = "w-full h-full flex items-center justify-center text-[10px] text-slate-400 font-bold p-2 text-center";
+                    placeholder.innerText = "Sin Fondo";
+                    slot.appendChild(placeholder);
+                }
+
+                // QR Overlay Box using Global Synchronized Position
+                const qrBox = document.createElement('div');
+                qrBox.className = "qr-wrapper";
+                qrBox.style.left = `${globalQrSettings.qrX}%`;
+                qrBox.style.top = `${globalQrSettings.qrY}%`;
+
+                const qrContainer = document.createElement('div');
+                qrContainer.id = `qr-a4-slot-${i}`;
+
+                qrBox.appendChild(qrContainer);
+                slot.appendChild(qrBox);
+
+                // Slot Label Badge
+                const badge = document.createElement('span');
+                badge.className = "absolute top-1.5 left-1.5 bg-slate-900/80 text-white text-[9px] font-extrabold px-1.5 py-0.5 rounded backdrop-blur-sm no-print pointer-events-none";
+                badge.innerText = `#${i + 1} - ${t.nombre}`;
+                slot.appendChild(badge);
+
+                contenedor.appendChild(slot);
+
+                // Generate QR Code using Global Synchronized Size
+                setTimeout(() => {
+                    new QRCode(qrContainer, {
+                        text: t.urlQR || "https://google.com",
+                        width: globalQrSettings.qrSize,
+                        height: globalQrSettings.qrSize,
+                        colorDark: "#000000",
+                        colorLight: "#ffffff",
+                        correctLevel: QRCode.CorrectLevel.M
+                    });
+                }, 30);
+            });
+        }
+
+        // Image Upload Handler
+        function cargarFondo(e, global) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    const dataUrl = evt.target.result;
+                    if (global) {
+                        tarjetas.forEach(t => t.fondo = dataUrl);
+                    } else {
+                        tarjetas[indiceActivo].fondo = dataUrl;
+                    }
+                    renderizarHojaA4();
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        // Load Default Demo Background
+        function cargarDisenoDemo() {
+            tarjetas.forEach(t => t.fondo = DEMO_SVG_BG);
+            sincronizarFormulario();
+            renderizarHojaA4();
+        }
+
+        // Export A4 Sheet at High Resolution (300 DPI)
+        function exportarPliegoA4() {
+            const hoja = document.getElementById('hojaA4');
+
+            html2canvas(hoja, {
+                scale: 3, // High DPI rendering
+                useCORS: true,
+                backgroundColor: "#ffffff"
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'Pliego-A4-6-Tarjetas-Resenas-Google.png';
+                link.href = canvas.toDataURL('image/png', 1.0);
+                link.click();
+            });
+        }
+    </script>
+</body>
+</html>
